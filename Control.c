@@ -136,18 +136,17 @@ void angle_determ(bool_t swing, ctrl_info_t * ctrl, int16_t delta_gh, int16_t de
  */ 
 void state_transfer(const rc_info_t * rc, ctrl_info_t * ctrl)
 {
-    int16_t M;
-    M = ctrl->chassis_ctrl_ptr->forward_back_speed_ref
-      + ctrl->chassis_ctrl_ptr->left_right_speed_ref
-      + ctrl->chassis_ctrl_ptr->rotation_speed_ref;
+    int16_t M = ctrl->chassis_ctrl_ptr->forward_back_speed_ref
+              + ctrl->chassis_ctrl_ptr->left_right_speed_ref
+              + ctrl->chassis_ctrl_ptr->rotation_speed_ref;
 
     OneBit one_bit;
     one_bit.S = rc->kb_ctrl.Swing == True?1:0;
     one_bit.M = M!=0?1:0;
     one_bit.B = angle_inbet > ANGLE_ERROR || angle_inbet < -1*ANGLE_ERROR ? 0:1;
-    
     one_bit.S1 = ctrl->state[2];
     one_bit.S2 = ctrl->state[3];
+
     one_bit.S1 = (one_bit.S2 & ~one_bit.M) | (one_bit.S1 & ~one_bit.B) | (~one_bit.S1 & ~one_bit.S2 & one_bit.S);
     one_bit.S2 = (~one_bit.S1 & one_bit.M);
 
@@ -165,21 +164,21 @@ void state_transfer(const rc_info_t * rc, ctrl_info_t * ctrl)
         ctrl->state[0] = 0;
         ctrl->state[1] = 0;
     }
-    else if(rc->sw1 == 1 && rc->sw2 == 1) // manual
+    else if(rc->sw2 == 1) // manual
     {
         ctrl->state[0] = 0;
         ctrl->state[1] = 1;
     }
-    else if(rc->sw1 == 3 && rc->sw2 == 1) // auto aiming
+    else if(rc->sw2 == 2) // auto aiming
     {
         ctrl->state[0] = 1;
         ctrl->state[1] = 0;          
     }
-    else if(rc->sw1 == 2 && rc->sw2 == 1) // auto
+    /*else if(rc->sw1 == 2 && rc->sw2 != 3) // auto
     {
         ctrl->state[0] = 1;
         ctrl->state[1] = 1;
-    }
+    }*/
     else                                                return; //not-in-used
 }
 
@@ -296,6 +295,26 @@ void refCalc(rc_info_t * rc, ctrl_info_t * ctrl)
     //state_transfer(rc, ctrl);angle_determ(ctrl); inside angle_cala()
 }
 
+/**function control
+ * @brief: implement particular functions for different types of robots
+ *         including state transfer and output generate
+ * @param: rc----structure for remote controller signals
+ *         func----structure for function implementation
+ * @reval: 
+*/
+void funcCtrl(rc_info_t * rc, func_t * func)
+{
+    #if ROBOT_TYPE == STANDARD
+    //TO DO
+    #endif
+    #if ROBOT_TYPE == HERO
+    //TO DO
+    #endif
+    #if ROBOT_TYPE == ENGINEER
+    //TO DO
+    #endif
+}
+
 /**remote control data dealler
  * @brief: store the collected data (communication buffer and motor feedback) in rc
  *         NOTE: this is merely for testing
@@ -342,6 +361,7 @@ void chassisGimbalInit(ctrl_info_t * ctrl)
 {
     *(ctrl->chassis_ctrl_ptr) = (chassis_ctrl_t)chassisInit;
     *(ctrl->gimbal_ctrl_ptr)  = (gimbal_ctrl_t)gimbalInit;
+    *(ctrl->func_ptr)         = (func_t)FuncInit;
     ctrl->state[0] = False;
     ctrl->state[1] = False;
     ctrl->state[2] = False;

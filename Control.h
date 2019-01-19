@@ -4,21 +4,26 @@
 #include "bool.h"
 #include "keyboard.h"
 
-#define HIGH_SPEED        256
-#define LOW_SPEED         128
-#define INI_SPEED         1
-#define ROTATION_SPEED    150
-#define SWING_SPEED       90
-#define SLOW_ROTATION     30
-#define SPEED_CONST		  0.00068f
-#define ANGLE_CONST       0.025f
-#define RC_MIDDLE         1024u
-#define ROTATION_CONST    0.01f
-#define BACK_CONST        0.7f
-#define ANGLE_ERROR       2
+typedef enum
+{
+    HERO = 1, STANDARD = 0, ENGINEER = 2
+}robot_type;
 
-#define CW                    1
-#define CCW                   -1
+#define ROBOT_TYPE        STANDARD
+
+#define HIGH_SPEED        256       //Maximum speed when chassis is in HIGH-SPEED-MODE
+#define LOW_SPEED         128       //Maximum speed when chassis is in LOW-SPEED-MODE
+#define INI_SPEED         1         //Initialization of chassis movement before speeding up when KEY is in use
+#define ROTATION_SPEED    150       //Const for chassis rotation when KEY is in use
+#define SWING_SPEED       90        //Const for dotch
+#define SPEED_CONST		  0.00068f  //Const for movement ref when RC is in use
+#define ANGLE_CONST       0.025f    //Const for rotation ref when MOUSE is in use
+#define ROTATION_CONST    0.01f     //Const for rotation ref when RC is in use
+#define BACK_CONST        0.7f      //Const for rotation ref when chassis is going to follow gimbal
+#define ANGLE_ERROR       2         //(Half of) Range of the available angle between chassis and gimbal
+
+#define CW                1
+#define CCW              -1
 
 typedef   signed short     int int16_t;
 typedef   signed          char int8_t;
@@ -28,11 +33,47 @@ typedef unsigned short     int uint16_t;
 //Initlization definition
 #define SIGINIT     {0,0}
 #define KbStateInit {{False,True},{False,True},{False,True},{False,True}}
-#define KbInit      {SIGINIT,SIGINIT,SIGINIT,SIGINIT,False,False,SIGINIT,False,KbStateInit,KbStateInit}
+#define KbInit      {SIGINIT,SIGINIT,SIGINIT,SIGINIT,False,False,SIGINIT,False,0,KbStateInit}
 #define RcInit      {0,0,0,0,0,0,0,0,0,0,KbInit,0,0}
 #define chassisInit {0,0,0}
 #define gimbalInit  {0,0}
 #define CtrlInit    {.state={False,False,False,False},.gimbal_ctrl_ptr=&GimbalSig,.chassis_ctrl_ptr=&ChassisSig}
+
+#if ROBOT_TYPE == STANDARD
+#define FuncInit    {0,0}
+#endif
+#if ROBOT_TYPE == HERO
+#define FuncInit    {0,0,0,0}
+#endif
+#if ROBOT_TYPE == ENGINEER
+#define FuncInit    {0,0}
+#endif
+
+typedef struct
+{
+    #if ROBOT_TYPE == STANDARD
+    uint8_t fWheel : 1;
+    uint8_t shoot  : 2;
+    uint8_t shootMode : 1;
+    #endif
+
+    #if ROBOT_TYPE == HERO
+    uint8_t fWheel  : 1;
+    uint8_t shootG1 : 2;
+    uint8_t shootG2 : 2;
+    int8_t  holder  : 1;
+    #endif
+
+    #if ROBOT_TYPE == ENGINEER
+    int8_t fecth_robot : 2;
+    int8_t get_bullet  : 2;
+    #endif
+}func_t;
+
+//SHOOT: 00(0)----N; 01(1)----one bullet one time; 10(2)----three bullet one time; 11(2)----keep shooting
+//SHOOTMODE: 0(0)----Waiting for signal/Done; 1(1)----Firing
+//HOLDER/FECTH_ROBOT/GET_BULLET: 00(0)----Retraction; 01(1)----Extending; 10(-2)----Retracting; 11(-1)----Extended
+                            //   OUTPUT_TO_LINEAR_MOTOR: X-X>>1
 
 typedef struct
 {
@@ -48,12 +89,12 @@ typedef struct
     keysignal_t A;
     keysignal_t S;
     keysignal_t D;
-    bool_t Q;
-    bool_t E;
+    bool_t Q : 1;
+    bool_t E : 1;
     keysignal_t High; //High speed
     bool_t Swing; //Swing
+    uint8_t othKey; //Other Keys
     keyState_t keyState; 
-    keyState_t prevState; //useless, to be cleared
 } KbCtrl_t;
 
 typedef struct
@@ -94,6 +135,7 @@ typedef struct
 typedef struct
 {
     bool_t state[4]; //auto-maunal state & G-C state
+    func_t * func_ptr;
     gimbal_ctrl_t * gimbal_ctrl_ptr;
     chassis_ctrl_t * chassis_ctrl_ptr;
 } ctrl_info_t;
@@ -111,6 +153,7 @@ void chassisGimbalInit(ctrl_info_t *);
 
 void rcDealler(const int16_t *, const int16_t *, rc_info_t *); //STEP1: store the given signal into the rc_info_t struct
 void refCalc(rc_info_t *, ctrl_info_t *); //STEP2: calculate the ref
+void funcCtrl(rc_info_t *, func_t *); //STEP3: conduct robot's functions, including shooting, rescuring and raising gimbal
 
 void speed_calc(rc_info_t *, ctrl_info_t *); // calculate the f/b/l/f speed
                                              // not const since the keyState is going to be updated
