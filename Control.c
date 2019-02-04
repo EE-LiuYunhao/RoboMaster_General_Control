@@ -1,5 +1,6 @@
 #include "Control.h"
 #include "bool.h"
+#include "SinCosList.h"
 
 //#define CONTROL_DEBUG
 //#define KEYSTATE_DEBUG
@@ -8,13 +9,18 @@
     #include <stdio.h>
 #endif
 
-extern int16_t angle_inbet;
-   
+extern int8_t ERROR_REPORTER;
+
+
 #define RCMOVE_INACTIVE         rc->ch1==0 && rc->ch2 == 0
 #define RCROTATE_INACTIVE       rc->ch3==0 && rc->ch4 == 0
 
 #define MODULE(x,y)             (x+y*(x>0?0:1-x/y))%y
 #define ANGLE_LIMIT(a)          MODULE((a+180),360)-180
+
+#define WHETHER_MOVE            ctrl->chassis_ctrl_ptr->forward_back_speed_ref!=0 &&ctrl->chassis_ctrl_ptr->left_right_speed_ref!=0 &&ctrl->chassis_ctrl_ptr->rotation_speed_ref!=0
+
+
 
 /**gimbal angle calculation basing on rc
  * @brief: calculate the gimbal horizontal and vertical angle with rc data
@@ -98,19 +104,19 @@ int16_t chassis_speed_key(keysignal_t * key,keysignal_t * high, bool_t * state, 
  *         angle_indet: extern global variable for anlge between chassis direction and gimbal direction
  * @reval:
  */ 
-void angle_determ(bool_t swing, ctrl_info_t * ctrl, int16_t delta_gh, int16_t delta_gv, int16_t delta_cr)
+void angle_determ(bool_t swing, ctrl_info_t * ctrl, int16_t delta_gh, int16_t delta_gv, int16_t delta_cr, int16_t angle_inbet)
 {
     if(ctrl->state[2]==0 && ctrl->state[3]==0)//C follow G mode
     {
         // in this mode, gimbal will not rotate relatively, angle of chassis rotation is either its orignal value or the gimbal ref
-        ctrl->chassis_ctrl_ptr->rotation_speed_ref  =  delta_cr + delta_gh;
-        ctrl->gimbal_ctrl_ptr->horizontal_angle_ref += delta_cr + delta_gh;
-        if(angle_inbet < ANGLE_ERROR && angle_inbet > -1*ANGLE_ERROR)           ctrl->gimbal_ctrl_ptr->horizontal_angle_ref -= angle_inbet;
+        ctrl->gimbal_ctrl_ptr->horizontal_angle_ref += (delta_cr + delta_gh);
+        ctrl->chassis_ctrl_ptr->rotation_speed_ref  =  (int16_t)(-1*ANGLE_INBET*angle_inbet);
+        //if(angle_inbet < ANGLE_ERROR && angle_inbet > -1*ANGLE_ERROR)           ctrl->gimbal_ctrl_ptr->horizontal_angle_ref -= angle_inbet;
     }
     else if(ctrl->state[2]==0 && ctrl->state[3]==1)//chassis move, gimbal free
     {
         ctrl->chassis_ctrl_ptr->rotation_speed_ref  =  delta_cr;
-        ctrl->gimbal_ctrl_ptr->horizontal_angle_ref += delta_gh;
+        ctrl->gimbal_ctrl_ptr->horizontal_angle_ref += (int16_t)(delta_gh-ANGLE_INBET*angle_inbet);
     }
     else if(ctrl->state[2]==1 && ctrl->state[3]==0)//chassis rotate and gimbal stick
     {
@@ -134,15 +140,11 @@ void angle_determ(bool_t swing, ctrl_info_t * ctrl, int16_t delta_gh, int16_t de
  *         angle_indet: extern global variable for anlge between chassis direction and gimbal direction
  * @reval:
  */ 
-void state_transfer(const rc_info_t * rc, ctrl_info_t * ctrl)
+void state_transfer(const rc_info_t * rc, ctrl_info_t * ctrl, int16_t angle_inbet)
 {
-    int16_t M = ctrl->chassis_ctrl_ptr->forward_back_speed_ref
-              + ctrl->chassis_ctrl_ptr->left_right_speed_ref
-              + ctrl->chassis_ctrl_ptr->rotation_speed_ref;
-
     OneBit one_bit;
     one_bit.S = rc->kb_ctrl.Swing == True?1:0;
-    one_bit.M = M!=0?1:0;
+    one_bit.M = WHETHER_MOVE?1:0;
     one_bit.B = angle_inbet > ANGLE_ERROR || angle_inbet < -1*ANGLE_ERROR ? 0:1;
     one_bit.S1 = ctrl->state[2];
     one_bit.S2 = ctrl->state[3];
@@ -196,11 +198,11 @@ void state_transfer(const rc_info_t * rc, ctrl_info_t * ctrl)
  *         delta_gimbal_vAngle----delta ref for relative vertical angle of gimbal rotation
  * @reval:
  */ 
-void angle_cala(const rc_info_t * rc, ctrl_info_t * ctrl)
+void angle_cala(const rc_info_t * rc, ctrl_info_t * ctrl, int16_t angle_inbet)
 {
     if(ctrl->state[0]==0 && ctrl->state[1]==0)                 //stop mode
     {
-        state_transfer(rc,ctrl);
+        state_transfer(rc,ctrl,angle_inbet);
         return;
     }
     int16_t delta_chassis_angle = chassis_angle_key(&rc->kb_ctrl);
@@ -227,12 +229,11 @@ void angle_cala(const rc_info_t * rc, ctrl_info_t * ctrl)
         delta_gimbal_hAngle = gimbal_mouse.horizontal_angle_ref;
     }
     delta_gimbal_hAngle = ANGLE_LIMIT(delta_gimbal_hAngle);
-    delta_gimbal_vAngle = delta_gimbal_vAngle>45 ? 45 : delta_gimbal_vAngle;
-    delta_gimbal_vAngle = delta_gimbal_vAngle<-45?-45 : delta_gimbal_vAngle;
+    delta_gimbal_vAngle = delta_gimbal_vAngle>25 ? 25 : delta_gimbal_vAngle;
+    delta_gimbal_vAngle = delta_gimbal_vAngle<-25?-25 : delta_gimbal_vAngle;
 
-    state_transfer(rc,ctrl);
-
-    angle_determ(rc->kb_ctrl.Swing,ctrl, delta_gimbal_hAngle, delta_gimbal_vAngle, delta_chassis_angle);
+    state_transfer(rc,ctrl,angle_inbet);
+    angle_determ(rc->kb_ctrl.Swing, ctrl, delta_gimbal_hAngle, delta_gimbal_vAngle, delta_chassis_angle,angle_inbet);
     ctrl->gimbal_ctrl_ptr->horizontal_angle_ref=ANGLE_LIMIT(ctrl->gimbal_ctrl_ptr->horizontal_angle_ref);
 }
 
@@ -249,9 +250,13 @@ void angle_cala(const rc_info_t * rc, ctrl_info_t * ctrl)
  *         rSpeed----the speed ref to shift right
  * @reval:
  */ 
-void speed_calc(rc_info_t * rc, ctrl_info_t * ctrl)
+void speed_calc(rc_info_t * rc, ctrl_info_t * ctrl, int16_t angle_inbet)
 {
-    if(ctrl->state[0]==0 && ctrl->state[1]==0)      return;// stop & initial mode
+    if(ctrl->state[0]==0 && ctrl->state[1]==0)
+    {
+        *(ctrl->chassis_ctrl_ptr) = (chassis_ctrl_t)chassisInit;
+        return;
+    }// stop & initial mode
     if(ctrl->state[0]==1 || RCMOVE_INACTIVE)                // auto-aiming or auto or remote-controller gives no sigals
     {
         int16_t fSpeed = ctrl->chassis_ctrl_ptr->forward_back_speed_ref>0?ctrl->chassis_ctrl_ptr->forward_back_speed_ref:0;
@@ -279,6 +284,13 @@ void speed_calc(rc_info_t * rc, ctrl_info_t * ctrl)
     {
         chassis_speed_rc(rc,ctrl->chassis_ctrl_ptr); 
     }
+
+    //derive the actual speed reference from the control ref and angle in between
+    int16_t vf_ref = ctrl->chassis_ctrl_ptr->forward_back_speed_ref;
+    ctrl->chassis_ctrl_ptr->forward_back_speed_ref = (int16_t)(vf_ref * toCos(angle_inbet)
+                       + ctrl->chassis_ctrl_ptr->left_right_speed_ref * toSin(angle_inbet));
+    ctrl->chassis_ctrl_ptr->left_right_speed_ref   = (int16_t)(vf_ref * toSin(angle_inbet)
+                       - ctrl->chassis_ctrl_ptr->left_right_speed_ref * toCos(angle_inbet));
 }
 
 /**referance calculation
@@ -288,10 +300,10 @@ void speed_calc(rc_info_t * rc, ctrl_info_t * ctrl)
  *         ctrl----the structure storing the state, speed and angle ref
  * @reval:
  */
-void refCalc(rc_info_t * rc, ctrl_info_t * ctrl)
+void refCalc(rc_info_t * rc, ctrl_info_t * ctrl, int16_t angle_inbet)
 {
-    speed_calc(rc, ctrl);
-    angle_cala(rc, ctrl);
+    speed_calc(rc, ctrl, angle_inbet);
+    angle_cala(rc, ctrl, angle_inbet);
     //state_transfer(rc, ctrl);angle_determ(ctrl); inside angle_cala()
 }
 
@@ -304,13 +316,13 @@ void refCalc(rc_info_t * rc, ctrl_info_t * ctrl)
 */
 void funcCtrl(rc_info_t * rc, func_t * func)
 {
-    #if ROBOT_TYPE == STANDARD
+    #ifdef  STANDARD
     //TO DO
     #endif
-    #if ROBOT_TYPE == HERO
+    #ifdef  HERO
     //TO DO
     #endif
-    #if ROBOT_TYPE == ENGINEER
+    #ifdef  ENGINEER
     //TO DO
     #endif
 }
@@ -324,7 +336,7 @@ void funcCtrl(rc_info_t * rc, func_t * func)
  *         angle_indet: extern global variable for anlge between chassis direction and gimbal direction
  * @reval:
  */
-void rcDealler(const int16_t * buff, const int16_t * feed, rc_info_t * rc)
+void rcDealler(const int16_t * buff, const int16_t * feed, rc_info_t * rc, int16_t angle_inbet)
 {
     rc->ch1 = buff[0];
     rc->ch2 = buff[1];

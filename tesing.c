@@ -5,11 +5,12 @@
 
 
 //global variables
-int16_t             angle_inbet;  //Angle in between
-
+int8_t ERROR_REPORTER = 0;
 
 int main()
 {
+    int16_t             angle_inbet;  //Angle in between
+
     rc_info_t           RcSig       = (rc_info_t)RcInit;
     chassis_ctrl_t      ChassisSig  = (chassis_ctrl_t)chassisInit;
     gimbal_ctrl_t       GimbalSig   = (gimbal_ctrl_t)gimbalInit;
@@ -28,8 +29,8 @@ int main()
     {
         for(int i=0;i<18;i++)           printf("%4d ",buffer[i]);
         printf(" %4d %d",feedback[0],feedback[1]);
-        rcDealler(buffer,feedback,&RcSig);
-        refCalc(&RcSig, &CtrlSig);
+        rcDealler(buffer,feedback,&RcSig,angle_inbet);
+        refCalc(&RcSig, &CtrlSig, angle_inbet);
 
         printState(&CtrlSig);
         printChassisRef(&CtrlSig);
