@@ -1,7 +1,10 @@
 #include "keyboard.h"
-#include <stdio.h>
 
 //#define KEYBOARD_DEBUG
+
+#ifdef KEYBOARD_DEBUG
+#include <stdio.h>
+#endif
 
 /**
  * @breif: key_state transfer
